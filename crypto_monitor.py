@@ -43,7 +43,7 @@ LOOKBACK_MINUTES = int(os.environ.get("LOOKBACK_MINUTES", "210"))
 CHECK_INTERVAL_SEC = int(os.environ.get("CHECK_INTERVAL_SEC", "15"))
 MIN_RANGE_PCT = float(os.environ.get("MIN_RANGE_PCT", "0"))
 
-BINANCE_KLINES_URL = "https://api.binance.com/api/v3/klines"
+BINANCE_KLINES_URL = "https://data-api.binance.vision/api/v3/klines"
 
 
 def send_telegram(message: str):
