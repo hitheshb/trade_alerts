@@ -6,14 +6,18 @@ events and:
   1. Sends a Telegram alert within ~5 minutes of each red event happening.
   2. Sends a daily digest at 9:00 AM IST listing every red event for
      today and tomorrow.
+  3. Replies instantly to /today and /upcoming commands sent in Telegram.
 
 Data source: https://nfs.faireconomy.media/ff_calendar_thisweek.json
 This is the same feed used by countless MT4/MT5 news-filter EAs.
 
 IMPORTANT: Forex Factory rate-limits this feed to 2 requests / 5 minutes
-across all formats. This script polls every 5 minutes and only adds one
-extra request/day for the digest — well within that limit. Do NOT lower
-CHECK_INTERVAL_SEC below 300 or you risk getting temporarily blocked.
+across all formats - exceeding it returns an HTML "Request Denied" page
+instead of JSON. To stay safely under that limit no matter how often you
+use /today or /upcoming, this script fetches the calendar exactly ONCE
+every CHECK_INTERVAL_SEC into a shared cache; every alert, digest, and
+command reply reads from that cache instead of hitting Forex Factory
+again. Do NOT lower CHECK_INTERVAL_SEC below 300.
 
 Environment variables:
     TELEGRAM_BOT_TOKEN   - from BotFather
@@ -48,6 +52,9 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 already_alerted = set()   # event keys we've already sent a real-time alert for
 last_digest_date = None   # date() we last sent the 9am digest for
+
+cached_events = []        # shared calendar data - refreshed periodically, read everywhere
+cache_lock = threading.Lock()
 
 
 def send_telegram(message: str, chat_id: str = None):
@@ -98,8 +105,31 @@ def is_high_impact(ev):
     return str(ev.get("impact", "")).strip().lower() == "high"
 
 
+def refresh_calendar_cache():
+    """Fetches both feeds ONCE and stores the result. Every other function
+    reads from this cache instead of hitting Forex Factory directly - this
+    is what keeps us under FF's 2-requests-per-5-minutes limit no matter
+    how many times /today or /upcoming get used."""
+    global cached_events
+    data = fetch_calendar(THISWEEK_URL) + fetch_calendar(NEXTWEEK_URL)
+    if data:
+        with cache_lock:
+            cached_events = data
+        log.info("Calendar cache refreshed: %d events", len(data))
+    else:
+        log.warning(
+            "Calendar fetch returned nothing (possibly rate-limited) - "
+            "keeping previous cache of %d events", len(cached_events)
+        )
+
+
+def get_cached_events():
+    with cache_lock:
+        return list(cached_events)
+
+
 def check_realtime_alerts():
-    events = fetch_calendar(THISWEEK_URL)
+    events = get_cached_events()
     now = datetime.now(timezone.utc)
 
     for ev in events:
@@ -134,7 +164,7 @@ def check_realtime_alerts():
 
 def build_events_message(day_specs):
     """day_specs: list of (label, date) tuples, e.g. [("Today", date1), ("Tomorrow", date2)]"""
-    events = fetch_calendar(THISWEEK_URL) + fetch_calendar(NEXTWEEK_URL)
+    events = get_cached_events()
     wanted_dates = {day for _, day in day_specs}
     label_for = {day: label for label, day in day_specs}
 
@@ -229,11 +259,18 @@ def command_listener():
 def main():
     log.info("Starting Forex Factory news watcher.")
     log.info("Check interval: %ds | Digest hour: %d:00 IST", CHECK_INTERVAL_SEC, DIGEST_HOUR_IST)
+
+    refresh_calendar_cache()  # initial load before anything else runs
     send_telegram("✅ News alert bot online. Watching for high-impact (red) events. Send /today or /upcoming anytime.")
 
     threading.Thread(target=command_listener, daemon=True).start()
 
     while True:
+        try:
+            refresh_calendar_cache()
+        except Exception as e:
+            log.error("Error refreshing calendar cache: %s", e)
+
         try:
             check_realtime_alerts()
         except Exception as e:
