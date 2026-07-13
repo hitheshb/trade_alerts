@@ -120,16 +120,8 @@ class SymbolWatcher:
         passes_noise_filter = range_pct >= MIN_RANGE_PCT
 
         if is_bigger and passes_noise_filter and prev_max > 0:
-            ts = datetime.fromtimestamp(open_time / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
             direction = "🟢 Bullish" if close_p >= open_p else "🔴 Bearish"
-            msg = (
-                f"⚡ <b>Volatility Alert: {self.symbol}</b>\n"
-                f"Time: {ts}\n"
-                f"Candle range: <b>{candle_range:.2f}</b> ({range_pct:.3f}% of price)\n"
-                f"Previous {self.lookback}-min max range: {prev_max:.2f}\n"
-                f"O: {open_p:.2f}  H: {high_p:.2f}  L: {low_p:.2f}  C: {close_p:.2f}\n"
-                f"{direction}"
-            )
+            msg = f"⚡ <b>{self.symbol}</b> - {direction}"
             log.info("ALERT %s: range %.2f > prev max %.2f", self.symbol, candle_range, prev_max)
             send_telegram(msg)
 
